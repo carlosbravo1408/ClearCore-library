@@ -161,7 +161,11 @@ public:
         /**
             [17] Serial port mode for USB.
         **/
-        USB_CDC
+        USB_CDC,
+        /**
+            [18] Screwdriver mode - only works on Motor0 and Motor1.
+        **/
+        SCREWDRIVER
     } ConnectorModes;
 
     /**

@@ -159,6 +159,29 @@ public:
     } HlfbStates;
 
     /**
+        \brief Return state when screwdriver state is requested
+    **/
+    typedef enum {
+        /**
+            Screwdriver input is de-asserted.
+        **/
+        SCREW_DEASSERTED,
+        /**
+            Screwdriver input is asserted.
+        **/
+        SCREW_ASSERTED,
+        /**
+            For Screwdriver input in I-Mon mode, there is an avaialable
+            measurement in the ADC
+        **/
+        SCREW_HAS_MEASUREMENT,
+        /**
+            Unknown state
+        **/
+        SCREW_UNKNOWN
+    } ScrewStates;
+
+    /**
         \brief Setup the HLFB query to match the ClearPath&trade; Motor's HLFB
         signaling format.
     **/
@@ -200,6 +223,23 @@ public:
         **/
         HLFB_MODE_HAS_BIPOLAR_PWM
     } HlfbModes;
+
+    /**
+        \brief Setup the screwdriver's monitor mode to match the output
+        from the screwdriver.
+    **/
+    typedef enum {
+        /**
+            The screw monitor input is digital and represents the state
+            of the screwdriver's clutch.
+        **/
+        SCREW_MODE_CLUTCH,
+        /**
+            The screw monitor input is analog and represents the current
+            it is pulling to keep spinning. 
+        **/
+        SCREW_MODE_IMON,
+    } ScrewdriverModes;
 
     typedef enum {
         HLFB_CARRIER_45_HZ,
@@ -628,6 +668,24 @@ public:
     }
 
     /**
+        \brief Sets operational mode of the screwdriver to match up with the
+        output from the Screwdriver
+
+        \code{.cpp}
+        // Set M-0's HLFB mode to bipolar PWM
+        ConnectorM0.ScrewdriverMode(MotorDriver::SCREW_);
+        \endcode
+
+        \param[in] newMode HLFB mode to switch to
+    **/
+    void ScrewdriverMode(ScrewdriverModes newMode) {
+        if (m_screwMode == newMode) {
+            return;
+        }
+        m_screwMode = newMode;
+    }
+
+    /**
         \brief Clear on read accessor for HLFB rising edge detection.
 
         \code{.cpp}
@@ -792,6 +850,32 @@ public:
         return Connector::Mode();
     }
 
+    /**
+        Enable the screwdriver
+    **/
+    void EnableScrewdriver(bool value){
+        EnableRequest(value);
+    }
+
+    /**
+        Start a screwdriver move pwm, true makes PWM A > PWM B.
+        pct determines the target pwm rates with PWM A = .5 + (pct/2)
+    **/
+    bool MoveScrewdriver(bool direction, double pct);
+    
+    /**
+        Stop a screwdriver move
+    **/
+    bool StopScrewdriver();
+
+    /**
+        Specify the screwdriver move's accel in time to hit 100% duty
+    **/
+    bool SetScrewRampTime(uint16_t rampTime) {
+        m_screwRampTimeToFullMs = rampTime;
+    }
+
+
 #ifndef HIDE_FROM_DOXYGEN
     virtual void OutputDirection() override {
         if (m_mode == Connector::CPM_MODE_STEP_AND_DIR &&
@@ -817,6 +901,8 @@ protected:
     const PeripheralRoute *m_aInfo;
     const PeripheralRoute *m_bInfo;
     const PeripheralRoute *m_hlfbInfo;
+    // Mapping to the ground pin used for screwdriver control
+    const PeripheralRoute *m_gInfo;
 
     // Keep some commonly-used bits from the Info structures
     uint32_t m_aDataMask;
@@ -854,6 +940,17 @@ protected:
     bool m_hlfbPwmReadingPending;
     uint16_t m_hlfbStateChangeCounter;
 
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    // Screwdriver State
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    // Screwdriver Monitor Mode
+    ScrewdriverModes m_screwMode;
+    uint8_t m_screwMovePwmA;
+    double m_screwMovePwmATarget;
+    uint16_t m_screwRampTimeToFullMs;
+
+    uint16_t GetInGReading();
+
     // Inversion mask of actual enable, direction, and HLFB state
     PolarityInversionsSD m_polarityInversions;
 
@@ -877,6 +974,8 @@ protected:
         Initialize hardware and/or internal state.
     **/
     void Initialize(ClearCorePins clearCorePin) override;
+    
+    void InitializeScrewdriver(ClearCorePins clutchPin);
 
     /**
         Function to toggle the enable state of the motor.
@@ -895,6 +994,10 @@ private:
     int32_t m_enableCounter;
     bool m_shiftRegEnableReq;
 
+    // Create instance of digital in to monitor clutch input
+    DigitalIn m_clutchIn;
+    //
+
     /**
         Construct, wire in pads and LED Shift register object
     **/
@@ -902,6 +1005,7 @@ private:
                 const PeripheralRoute *aInfo,
                 const PeripheralRoute *bInfo,
                 const PeripheralRoute *hlfbInfo,
+                const PeripheralRoute *gInfo,
                 uint16_t hlfbTc,
                 uint16_t hlfbEvt);
 
@@ -915,6 +1019,12 @@ private:
 
     // Poll electrical connector state and update the internal state.
     void Refresh() override;
+
+    // Check and update screwdriver state
+    void RefreshScrewdriver();
+
+    // Check for clutch active and over current based on m_screwMode
+    bool ScrewDone();
 
     /**
         \brief Sets/Clears the fault flag and halts/restores the motor.

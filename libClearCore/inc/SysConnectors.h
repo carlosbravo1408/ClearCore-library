@@ -84,6 +84,8 @@ typedef enum {
     CLEARCORE_PIN_M1_INB,   ///< [27] M-1 ClearCore::MotorDriver InB
     CLEARCORE_PIN_M2_INB,   ///< [28] M-2 ClearCore::MotorDriver InB
     CLEARCORE_PIN_M3_INB,   ///< [29] M-3 ClearCore::MotorDriver InB
+    CLEARCORE_PIN_M2_ING,   ///< [30] M-2 ClearCore::MotorDriver InG
+    CLEARCORE_PIN_M3_ING,   ///< [31] M-3 ClearCore::MotorDriver InG
     // CCIO-8 Pins
     CLEARCORE_PIN_CCIO_BASE = 64,///< [64] Base index of CCIO-8 connectors
     CLEARCORE_PIN_CCIOA0 = CLEARCORE_PIN_CCIO_BASE, ///< CCIO-8 board 1, connector 0

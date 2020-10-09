@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <sam.h>
 #include "atomic_utils.h"
+#include "AdcManager.h"
 #include "InputManager.h"
 #include "StatusManager.h"
 #include "SysTiming.h"
@@ -37,6 +38,7 @@ namespace ClearCore {
 
 extern SysTiming &TimingMgr;
 extern ShiftRegister ShiftReg;
+extern AdcManager &AdcMgr;
 extern volatile uint32_t tickCnt;
 
 static Tcc *const tcc_modules[TCC_INST_NUM] = TCC_INSTS;
@@ -75,6 +77,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
                          const PeripheralRoute *aInfo,
                          const PeripheralRoute *bInfo,
                          const PeripheralRoute *hlfbInfo,
+                         const PeripheralRoute *gInfo,
                          uint16_t hlfbTc,
                          uint16_t hlfbEvt)
     : DigitalIn(ShiftRegister::Masks::SR_NO_FEEDBACK_MASK, hlfbInfo),
@@ -82,6 +85,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_aInfo(aInfo),
       m_bInfo(bInfo),
       m_hlfbInfo(hlfbInfo),
+      m_gInfo(gInfo),
       m_aDataMask(1UL << aInfo->gpioPin),
       m_bDataMask(1UL << bInfo->gpioPin),
       m_hlfbTcNum(hlfbTc),
@@ -98,6 +102,10 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_lastHlfbInputValue(false),
       m_hlfbPwmReadingPending(false),
       m_hlfbStateChangeCounter(MS_TO_SAMPLES * HLFB_CARRIER_LOSS_STATE_CHANGE_MS_45_HZ),
+      m_screwMode(SCREW_MODE_CLUTCH),
+      m_screwMovePwmA(127),
+      m_screwMovePwmATarget(.5),
+      m_screwRampTimeToFullMs(25),
       m_polarityInversions(0),
       m_enableRequestedState(false),
       m_enableTriggerActive(false),
@@ -133,12 +141,55 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
     m_bTccSyncReg = &theTcc->SYNCBUSY.reg;
 }
 
+bool MotorDriver::ScrewDone() {
+    switch (m_screwMode) {
+        case SCREW_MODE_IMON:
+            
+            break;
+        case SCREW_MODE_CLUTCH:
+        default:
+            
+            break;
+    }
+
+}
+
+/*
+    Update the Screwdriver move
+*/
+void MotorDriver::RefreshScrewdriver() {
+    // Process the clutch input as static levels/filtering
+    bool readClutchState = m_clutchIn.m_stateFiltered;
+    m_clutchIn.Refresh();
+    if (readClutchState != m_clutchIn.m_stateFiltered) {
+        readClutchState = m_clutchIn.m_stateFiltered;
+    }
+
+    // If the trigger is not held or the clutch has been hit
+    if (HlfbState() != HLFB_ASSERTED || readClutchState) {
+        // Override the target to stop the screwdriver
+        MotorInADuty(UINT8_MAX / 2);
+        MotorInBDuty(UINT8_MAX / 2);
+    }
+    else if (m_screwMovePwmA != m_screwMovePwmATarget) {
+        // TODO have this ramp up over time
+        m_screwMovePwmA = UINT8_MAX * m_screwMovePwmATarget;   
+        MotorInADuty(m_screwMovePwmA);
+        MotorInBDuty(255 - m_screwMovePwmA);  
+    }
+
+}
+
 /*
     Update the HLFB state
 */
 void MotorDriver::Refresh() {
     if (!m_initialized) {
         return;
+    }
+
+    if (m_mode == Connector::SCREWDRIVER && m_isEnabled) {
+        RefreshScrewdriver();
     }
 
     // Process the HLFB input as static levels/filtering
@@ -234,6 +285,14 @@ void MotorDriver::Refresh() {
             m_hlfbDuty = HLFB_DUTY_UNKNOWN;
             m_hlfbState = (DigitalIn::m_stateFiltered ^ invert) ?
                           HLFB_ASSERTED : HLFB_DEASSERTED;
+            break;
+    }
+
+    // Process the Screw information
+    switch (m_screwMode) {
+        case SCREW_MODE_IMON:
+        case SCREW_MODE_CLUTCH:
+        default:
             break;
     }
 
@@ -334,6 +393,19 @@ bool MotorDriver::MoveVelocity(int32_t velocity) {
     return StepGenerator::MoveVelocity(velocity);
 }
 
+bool MotorDriver::MoveScrewdriver(bool direction, double pct){
+    if (direction) {
+        m_screwMovePwmATarget = .5 + (pct / 2);
+    }
+    else {
+        m_screwMovePwmATarget = .5 - (pct / 2);
+    }
+}
+
+bool MotorDriver::StopScrewdriver() {
+    m_screwMovePwmATarget = .5;
+}
+
 MotorDriver::StatusRegMotor MotorDriver::StatusRegRisen() {
     return StatusRegMotor(atomic_exchange_n(&m_statusRegMotorRisen.reg, 0));
 }
@@ -376,7 +448,8 @@ bool MotorDriver::MotorInBState(bool value) {
 }
 
 bool MotorDriver::MotorInADuty(uint8_t duty) {
-    if (Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM) {
+    if (Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM || 
+            Connector::m_mode == Connector::SCREWDRIVER) {
         m_aDutyCnt = (static_cast<uint32_t>(duty) * m_stepsPerSampleMax +
                       (UINT8_MAX / 2)) / UINT8_MAX;
         UpdateADuty();
@@ -387,7 +460,8 @@ bool MotorDriver::MotorInADuty(uint8_t duty) {
 
 bool MotorDriver::MotorInBDuty(uint8_t duty) {
     if (Connector::m_mode == Connector::CPM_MODE_A_DIRECT_B_PWM ||
-            Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM) {
+            Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM || 
+            Connector::m_mode == Connector::SCREWDRIVER) {
         m_bDutyCnt = (static_cast<uint32_t>(duty) * m_stepsPerSampleMax +
                       (UINT8_MAX / 2)) / UINT8_MAX;
         UpdateBDuty();
@@ -621,6 +695,22 @@ void MotorDriver::Initialize(ClearCorePins clearCorePin) {
     m_initialized = true;
 }
 
+void MotorDriver::InitializeScrewdriver(ClearCorePins clutchPin) {
+    // Initialize the clutch input
+    m_clutchIn = DigitalIn(ShiftRegister::Masks::SR_NO_FEEDBACK_MASK, m_gInfo);
+    m_clutchIn.Initialize(clutchPin);
+    m_clutchIn.FilterLength(0);
+}
+
+uint16_t MotorDriver::GetInGReading() {
+    if (m_clearCorePin = CLEARCORE_PIN_M2) {
+        return AdcMgr.FilteredResult(AdcManager::ADC_SDRVR2_IMON);
+    }
+    else if (m_clearCorePin = CLEARCORE_PIN_M3) {
+        return AdcMgr.FilteredResult(AdcManager::ADC_SDRVR3_IMON);
+    }
+}
+
 bool MotorDriver::Mode(ConnectorModes newMode) {
     // Bail out if we are already in the requested mode
     if (newMode == m_mode) {
@@ -628,6 +718,7 @@ bool MotorDriver::Mode(ConnectorModes newMode) {
     }
 
     switch (newMode) {
+        // TODO turn off scredriver shiftreg bits when not in screw mode
         case CPM_MODE_A_PWM_B_PWM:
             // Stop any active S&D command
             MoveStopAbrupt();
@@ -665,6 +756,36 @@ bool MotorDriver::Mode(ConnectorModes newMode) {
             PMUX_DISABLE(m_aInfo->gpioPort, m_aInfo->gpioPin);
             PMUX_DISABLE(m_bInfo->gpioPort, m_bInfo->gpioPin);
             m_mode = CPM_MODE_A_DIRECT_B_DIRECT;
+            break;
+        case SCREWDRIVER:
+            // Block this setting if this is not M2 or M3
+            if (m_clearCorePin != CLEARCORE_PIN_M2 &&
+                m_clearCorePin != CLEARCORE_PIN_M3) {
+                break;
+            }
+            // Configure other parts that will ALWAYS be a certain way when
+            // running a screwdriver
+            HlfbMode(HLFB_MODE_STATIC);
+            if (m_clearCorePin == CLEARCORE_PIN_M2) {
+                ShiftReg.ShifterStateClear(ShiftRegister::SR_A_CTRL_2_MASK);
+            }
+            else if (m_clearCorePin == CLEARCORE_PIN_M3) {
+                ShiftReg.ShifterStateClear(ShiftRegister::SR_A_CTRL_3_MASK);
+            }
+
+            // Stop any active S&D command
+            MoveStopAbrupt();
+            // Block the interrupt and make sure that the PWM values are cleared
+            __disable_irq();
+            m_aDutyCnt = 0;
+            UpdateADuty();
+            m_bDutyCnt = 0;
+            UpdateBDuty();
+            // Enable peripheral on port/pin A and B to use PWM on both
+            PMUX_ENABLE(m_aInfo->gpioPort, m_aInfo->gpioPin);
+            PMUX_ENABLE(m_bInfo->gpioPort, m_bInfo->gpioPin);
+            m_mode = newMode;
+            __enable_irq();   
             break;
         default:
             return false;
