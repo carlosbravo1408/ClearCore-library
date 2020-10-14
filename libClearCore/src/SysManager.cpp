@@ -202,15 +202,15 @@ SysManager::SysManager() : m_readyForOperations(false) {
                                      &IN12n_AIN12, AdcManager::ADC_AIN12);
 
     ConnectorM0 = MotorDriver(ShiftRegister::SR_EN_OUT_0_MASK, &Mtr0_An_SCTx,
-                              &Mtr0_B, &Mtr0_HLFB_SCRx, &Sdrvr0_iMon, 4, EVSYS_M0);
+                              &Mtr0_B, &Mtr0_HLFB_SCRx, 4, EVSYS_M0);
     ConnectorM1 = MotorDriver(ShiftRegister::SR_EN_OUT_1_MASK, &Mtr1_An,
-                              &Mtr1_B, &Mtr1_HLFB, &Sdrvr1_iMon, 5, EVSYS_M1);
+                              &Mtr1_B, &Mtr1_HLFB, 5, EVSYS_M1);
     ConnectorM2 = MotorDriver(ShiftRegister::SR_EN_OUT_2_MASK,
                               &Mtr2_An_Sdrvr2_PWMA, &Mtr2_B_Sdrvr2_PWMB,
-                              &Mtr2_HLFB_Sdrvr2_Trig, &Sdrvr2_iMon, 3, EVSYS_M2);
+                              &Mtr2_HLFB_Sdrvr2_Trig, 3, EVSYS_M2);
     ConnectorM3 = MotorDriver(ShiftRegister::SR_EN_OUT_3_MASK,
                               &Mtr3_An_Sdrvr3_PWMA, &Mtr3_B_Sdrvr3_PWMB,
-                              &Mtr3_HLFB_Sdrvr3_Trig, &Sdrvr3_iMon, 0, EVSYS_M3);
+                              &Mtr3_HLFB_Sdrvr3_Trig, 0, EVSYS_M3);
 
     ConnectorCOM0 = SerialDriver(0, ShiftRegister::SR_LED_COM_0_MASK,
                                  ShiftRegister::SR_UART_SPI_SEL_0_MASK,

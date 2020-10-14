@@ -55,6 +55,10 @@ namespace ClearCore {
 /** Default enable trigger pulse width, in milliseconds. **/
 #define DEFAULT_TRIGGER_PULSE_WIDTH_MS  25
 
+/** Default clutch input threhshold in volts **/
+#define SCREW_CLUTCH_THRESHOLD 1.0
+#define DUTY_50_PCT 127
+
 /**
     \brief ClearCore motor connector class.
 
@@ -851,17 +855,13 @@ public:
     }
 
     /**
-        Enable the screwdriver
-    **/
-    void EnableScrewdriver(bool value){
-        EnableRequest(value);
-    }
-
-    /**
         Start a screwdriver move pwm, true makes PWM A > PWM B.
         pct determines the target pwm rates with PWM A = .5 + (pct/2)
     **/
-    bool MoveScrewdriver(bool direction, double pct);
+    bool MoveScrewdriver(uint8_t duty,
+                         bool direction);
+
+    bool MoveScrewdriver(uint8_t duty);
     
     /**
         Stop a screwdriver move
@@ -901,8 +901,6 @@ protected:
     const PeripheralRoute *m_aInfo;
     const PeripheralRoute *m_bInfo;
     const PeripheralRoute *m_hlfbInfo;
-    // Mapping to the ground pin used for screwdriver control
-    const PeripheralRoute *m_gInfo;
 
     // Keep some commonly-used bits from the Info structures
     uint32_t m_aDataMask;
@@ -944,12 +942,17 @@ protected:
     // Screwdriver State
     // - - - - - - - - - - - - - - - - - - - - - - - - - - -
     // Screwdriver Monitor Mode
+
     ScrewdriverModes m_screwMode;
+    float m_screwClutchThreshold;
     uint8_t m_screwMovePwmA;
     double m_screwMovePwmATarget;
     uint16_t m_screwRampTimeToFullMs;
 
+
     uint16_t GetInGReading();
+
+    bool IsClutchActive();
 
     // Inversion mask of actual enable, direction, and HLFB state
     PolarityInversionsSD m_polarityInversions;
@@ -994,10 +997,6 @@ private:
     int32_t m_enableCounter;
     bool m_shiftRegEnableReq;
 
-    // Create instance of digital in to monitor clutch input
-    DigitalIn m_clutchIn;
-    //
-
     /**
         Construct, wire in pads and LED Shift register object
     **/
@@ -1005,7 +1004,6 @@ private:
                 const PeripheralRoute *aInfo,
                 const PeripheralRoute *bInfo,
                 const PeripheralRoute *hlfbInfo,
-                const PeripheralRoute *gInfo,
                 uint16_t hlfbTc,
                 uint16_t hlfbEvt);
 

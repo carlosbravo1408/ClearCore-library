@@ -77,7 +77,6 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
                          const PeripheralRoute *aInfo,
                          const PeripheralRoute *bInfo,
                          const PeripheralRoute *hlfbInfo,
-                         const PeripheralRoute *gInfo,
                          uint16_t hlfbTc,
                          uint16_t hlfbEvt)
     : DigitalIn(ShiftRegister::Masks::SR_NO_FEEDBACK_MASK, hlfbInfo),
@@ -85,7 +84,6 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_aInfo(aInfo),
       m_bInfo(bInfo),
       m_hlfbInfo(hlfbInfo),
-      m_gInfo(gInfo),
       m_aDataMask(1UL << aInfo->gpioPin),
       m_bDataMask(1UL << bInfo->gpioPin),
       m_hlfbTcNum(hlfbTc),
@@ -106,6 +104,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_screwMovePwmA(127),
       m_screwMovePwmATarget(.5),
       m_screwRampTimeToFullMs(25),
+      m_screwClutchThreshold(SCREW_CLUTCH_THRESHOLD),
       m_polarityInversions(0),
       m_enableRequestedState(false),
       m_enableTriggerActive(false),
@@ -148,34 +147,33 @@ bool MotorDriver::ScrewDone() {
             break;
         case SCREW_MODE_CLUTCH:
         default:
-            
+            return IsClutchActive();
             break;
     }
-
 }
 
 /*
     Update the Screwdriver move
 */
 void MotorDriver::RefreshScrewdriver() {
-    // Process the clutch input as static levels/filtering
-    bool readClutchState = m_clutchIn.m_stateFiltered;
-    m_clutchIn.Refresh();
-    if (readClutchState != m_clutchIn.m_stateFiltered) {
-        readClutchState = m_clutchIn.m_stateFiltered;
-    }
+    // Check if the screw process is complete
+    bool isScrewDone = ScrewDone();
 
-    // If the trigger is not held or the clutch has been hit
-    if (HlfbState() != HLFB_ASSERTED || readClutchState) {
-        // Override the target to stop the screwdriver
-        MotorInADuty(UINT8_MAX / 2);
-        MotorInBDuty(UINT8_MAX / 2);
+    // If the trigger is not held
+    if (HlfbState() != HLFB_ASSERTED) {
+        // Override the target to temporarily stop the screwdriver
+        MotorInADuty(DUTY_50_PCT);
+        MotorInBDuty(DUTY_50_PCT);
+    }
+    else if (isScrewDone) {
+        // Stop the screwdriver and cancel the current move
+        StopScrewdriver();
     }
     else if (m_screwMovePwmA != m_screwMovePwmATarget) {
         // TODO have this ramp up over time
         m_screwMovePwmA = UINT8_MAX * m_screwMovePwmATarget;   
         MotorInADuty(m_screwMovePwmA);
-        MotorInBDuty(255 - m_screwMovePwmA);  
+        MotorInBDuty(UINT8_MAX - m_screwMovePwmA);  
     }
 
 }
@@ -393,17 +391,31 @@ bool MotorDriver::MoveVelocity(int32_t velocity) {
     return StepGenerator::MoveVelocity(velocity);
 }
 
-bool MotorDriver::MoveScrewdriver(bool direction, double pct){
+bool MotorDriver::MoveScrewdriver(uint8_t duty,
+                                  bool direction) {
+    // Make sure we are enabled and that a screw move is marked as requested
+    if (!m_enableRequestedState) {
+        EnableRequest(true);
+    }
+
+    // Based on the direction of the move, determine the PWM rates
     if (direction) {
-        m_screwMovePwmATarget = .5 + (pct / 2);
+        m_screwMovePwmATarget = duty;
     }
     else {
-        m_screwMovePwmATarget = .5 - (pct / 2);
+        m_screwMovePwmATarget = UINT8_MAX - duty;
     }
 }
 
+bool MotorDriver::MoveScrewdriver(uint8_t duty) {
+    MoveScrewdriver(duty, false);
+}
+
 bool MotorDriver::StopScrewdriver() {
-    m_screwMovePwmATarget = .5;
+    EnableRequest(false);
+    MotorInADuty(DUTY_50_PCT);
+    MotorInBDuty(DUTY_50_PCT);
+    m_screwMovePwmATarget = DUTY_50_PCT;
 }
 
 MotorDriver::StatusRegMotor MotorDriver::StatusRegRisen() {
@@ -451,7 +463,7 @@ bool MotorDriver::MotorInADuty(uint8_t duty) {
     if (Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM || 
             Connector::m_mode == Connector::SCREWDRIVER) {
         m_aDutyCnt = (static_cast<uint32_t>(duty) * m_stepsPerSampleMax +
-                      (UINT8_MAX / 2)) / UINT8_MAX;
+                      (DUTY_50_PCT)) / UINT8_MAX;
         UpdateADuty();
         return true;
     }
@@ -463,7 +475,7 @@ bool MotorDriver::MotorInBDuty(uint8_t duty) {
             Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM || 
             Connector::m_mode == Connector::SCREWDRIVER) {
         m_bDutyCnt = (static_cast<uint32_t>(duty) * m_stepsPerSampleMax +
-                      (UINT8_MAX / 2)) / UINT8_MAX;
+                      (DUTY_50_PCT)) / UINT8_MAX;
         UpdateBDuty();
         return true;
     }
@@ -696,19 +708,37 @@ void MotorDriver::Initialize(ClearCorePins clearCorePin) {
 }
 
 void MotorDriver::InitializeScrewdriver(ClearCorePins clutchPin) {
-    // Initialize the clutch input
-    m_clutchIn = DigitalIn(ShiftRegister::Masks::SR_NO_FEEDBACK_MASK, m_gInfo);
-    m_clutchIn.Initialize(clutchPin);
-    m_clutchIn.FilterLength(0);
+    
 }
 
 uint16_t MotorDriver::GetInGReading() {
-    if (m_clearCorePin = CLEARCORE_PIN_M2) {
+    if (m_clearCorePin == CLEARCORE_PIN_M2) {
         return AdcMgr.FilteredResult(AdcManager::ADC_SDRVR2_IMON);
     }
-    else if (m_clearCorePin = CLEARCORE_PIN_M3) {
+    else if (m_clearCorePin == CLEARCORE_PIN_M3) {
         return AdcMgr.FilteredResult(AdcManager::ADC_SDRVR3_IMON);
     }
+}
+
+bool MotorDriver::IsClutchActive() {
+    float adcRead;
+
+    // Get the appropriate reading
+    if (m_clearCorePin == CLEARCORE_PIN_M2) {
+        adcRead = AdcMgr.AnalogVoltage(AdcManager::ADC_SDRVR2_IMON);
+    }
+    else if (m_clearCorePin == CLEARCORE_PIN_M3) {
+        adcRead = AdcMgr.AnalogVoltage(AdcManager::ADC_SDRVR3_IMON);
+    }
+
+    // Check if we are reading below the threshold
+    if (adcRead < m_screwClutchThreshold) {
+        return true;
+    }
+    else {
+        return false;
+    }
+
 }
 
 bool MotorDriver::Mode(ConnectorModes newMode) {
@@ -767,10 +797,10 @@ bool MotorDriver::Mode(ConnectorModes newMode) {
             // running a screwdriver
             HlfbMode(HLFB_MODE_STATIC);
             if (m_clearCorePin == CLEARCORE_PIN_M2) {
-                ShiftReg.ShifterStateClear(ShiftRegister::SR_A_CTRL_2_MASK);
+                ShiftReg.ShifterStateSet(ShiftRegister::SR_A_CTRL_2_MASK);
             }
             else if (m_clearCorePin == CLEARCORE_PIN_M3) {
-                ShiftReg.ShifterStateClear(ShiftRegister::SR_A_CTRL_3_MASK);
+                ShiftReg.ShifterStateSet(ShiftRegister::SR_A_CTRL_3_MASK);
             }
 
             // Stop any active S&D command
