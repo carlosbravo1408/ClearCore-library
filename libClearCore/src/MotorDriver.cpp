@@ -103,7 +103,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_screwMode(SCREW_MODE_CLUTCH),
       m_screwMovePwmA(127),
       m_screwMovePwmATarget(.5),
-      m_screwRampTimeToFullMs(25),
+      m_dutyPerSample(1),
       m_screwClutchThreshold(SCREW_CLUTCH_THRESHOLD),
       m_polarityInversions(0),
       m_enableRequestedState(false),
@@ -164,18 +164,29 @@ void MotorDriver::RefreshScrewdriver() {
         // Override the target to temporarily stop the screwdriver
         MotorInADuty(DUTY_50_PCT);
         MotorInBDuty(DUTY_50_PCT);
+        m_screwMovePwmA = DUTY_50_PCT;
     }
     else if (isScrewDone) {
         // Stop the screwdriver and cancel the current move
         StopScrewdriver();
     }
-    else if (m_screwMovePwmA != m_screwMovePwmATarget) {
-        // TODO have this ramp up over time
-        m_screwMovePwmA = UINT8_MAX * m_screwMovePwmATarget;   
-        MotorInADuty(m_screwMovePwmA);
-        MotorInBDuty(UINT8_MAX - m_screwMovePwmA);  
-    }
-
+    else {
+        if (m_screwMovePwmA < m_screwMovePwmATarget) {
+            m_screwMovePwmA += m_dutyPerSample;
+            if (m_screwMovePwmA > m_screwMovePwmATarget) {
+                m_screwMovePwmA = m_screwMovePwmATarget;
+            }
+        }
+        else if (m_screwMovePwmA > m_screwMovePwmATarget) {
+            m_screwMovePwmA -= m_dutyPerSample;
+            if (m_screwMovePwmA < m_screwMovePwmATarget) {
+                m_screwMovePwmA = m_screwMovePwmATarget;
+            }
+        }
+        // Update the PWMs
+        MotorInADuty(static_cast<uint8_t>(m_screwMovePwmA));
+        MotorInBDuty(UINT8_MAX - static_cast<uint8_t>(m_screwMovePwmA));
+    }   
 }
 
 /*
@@ -393,6 +404,9 @@ bool MotorDriver::MoveVelocity(int32_t velocity) {
 
 bool MotorDriver::MoveScrewdriver(uint8_t duty,
                                   bool direction) {
+    // Check for out of bounds
+    if (duty > UINT8_MAX) return false;
+
     // Make sure we are enabled and that a screw move is marked as requested
     if (!m_enableRequestedState) {
         EnableRequest(true);
@@ -405,17 +419,19 @@ bool MotorDriver::MoveScrewdriver(uint8_t duty,
     else {
         m_screwMovePwmATarget = UINT8_MAX - duty;
     }
+    return true;
 }
 
 bool MotorDriver::MoveScrewdriver(uint8_t duty) {
-    MoveScrewdriver(duty, false);
+    return MoveScrewdriver(duty, true);
 }
 
-bool MotorDriver::StopScrewdriver() {
+void MotorDriver::StopScrewdriver() {
     EnableRequest(false);
     MotorInADuty(DUTY_50_PCT);
     MotorInBDuty(DUTY_50_PCT);
     m_screwMovePwmATarget = DUTY_50_PCT;
+    m_screwMovePwmA = DUTY_50_PCT;
 }
 
 MotorDriver::StatusRegMotor MotorDriver::StatusRegRisen() {
@@ -463,7 +479,7 @@ bool MotorDriver::MotorInADuty(uint8_t duty) {
     if (Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM || 
             Connector::m_mode == Connector::SCREWDRIVER) {
         m_aDutyCnt = (static_cast<uint32_t>(duty) * m_stepsPerSampleMax +
-                      (DUTY_50_PCT)) / UINT8_MAX;
+                      (UINT8_MAX / 2)) / UINT8_MAX;
         UpdateADuty();
         return true;
     }
@@ -475,7 +491,7 @@ bool MotorDriver::MotorInBDuty(uint8_t duty) {
             Connector::m_mode == Connector::CPM_MODE_A_PWM_B_PWM || 
             Connector::m_mode == Connector::SCREWDRIVER) {
         m_bDutyCnt = (static_cast<uint32_t>(duty) * m_stepsPerSampleMax +
-                      (DUTY_50_PCT)) / UINT8_MAX;
+                      (UINT8_MAX / 2)) / UINT8_MAX;
         UpdateBDuty();
         return true;
     }

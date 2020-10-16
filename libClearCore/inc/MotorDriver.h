@@ -34,6 +34,7 @@
 #include "ShiftRegister.h"
 #include "StatusManager.h"
 #include "StepGenerator.h"
+#include "SysTiming.h"
 #include "SysUtils.h"
 
 #define HLFB_CARRIER_LOSS_ERROR_LIMIT (0)
@@ -866,13 +867,18 @@ public:
     /**
         Stop a screwdriver move
     **/
-    bool StopScrewdriver();
+    void StopScrewdriver();
 
     /**
-        Specify the screwdriver move's accel in time to hit 100% duty
+        Specify the time the screwdriver will take to ramp from stopped to 100%
     **/
-    bool SetScrewRampTime(uint16_t rampTime) {
-        m_screwRampTimeToFullMs = rampTime;
+    bool SetScrewRampTime(double rampTimeMS) {
+        m_dutyPerSample = (UINT8_MAX - DUTY_50_PCT) / 
+                                ((rampTimeMS / 1000) * SampleRateHz);
+    }
+
+    double GetScrewPwmA() {
+        return m_screwMovePwmA;
     }
 
 
@@ -945,9 +951,9 @@ protected:
 
     ScrewdriverModes m_screwMode;
     float m_screwClutchThreshold;
-    uint8_t m_screwMovePwmA;
-    double m_screwMovePwmATarget;
-    uint16_t m_screwRampTimeToFullMs;
+    double m_screwMovePwmA;
+    uint8_t m_screwMovePwmATarget;
+    double m_dutyPerSample;
 
 
     uint16_t GetInGReading();
