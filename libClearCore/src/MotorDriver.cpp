@@ -105,7 +105,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_screwMovePwmATarget(.5),
       m_dutyPerSample(1),
       m_screwClutchThreshold(SCREW_CLUTCH_THRESHOLD),
-      m_isScrewDone(false),
+      m_screwDone(false),
       m_polarityInversions(0),
       m_enableRequestedState(false),
       m_enableTriggerActive(false),
@@ -158,7 +158,7 @@ bool MotorDriver::ScrewDoneCheck() {
 */
 void MotorDriver::RefreshScrewdriver() {
     // Check if the screw process is complete
-    m_isScrewDone = ScrewDoneCheck();
+    m_screwDone = ScrewDoneCheck();
 
     // If the trigger is not held
     if (!TriggerState()) {
@@ -167,9 +167,9 @@ void MotorDriver::RefreshScrewdriver() {
         MotorInBDuty(DUTY_50_PCT);
         m_screwMovePwmA = DUTY_50_PCT;
     }
-    else if (m_isScrewDone) {
+    else if (m_screwDone) {
         // Stop the screwdriver and cancel the current move
-        StopScrewdriver();
+        ScrewStop();
     }
     else {
         if (m_screwMovePwmA < m_screwMovePwmATarget) {
@@ -427,7 +427,7 @@ bool MotorDriver::ScrewStart(uint8_t duty) {
     return ScrewStart(duty, true);
 }
 
-void MotorDriver::StopScrewdriver() {
+void MotorDriver::ScrewStop() {
     EnableRequest(false);
     MotorInADuty(DUTY_50_PCT);
     MotorInBDuty(DUTY_50_PCT);
