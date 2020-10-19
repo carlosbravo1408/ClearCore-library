@@ -859,10 +859,10 @@ public:
         Start a screwdriver move pwm, true makes PWM A > PWM B.
         pct determines the target pwm rates with PWM A = .5 + (pct/2)
     **/
-    bool MoveScrewdriver(uint8_t duty,
+    bool ScrewStart(uint8_t duty,
                          bool direction);
 
-    bool MoveScrewdriver(uint8_t duty);
+    bool ScrewStart(uint8_t duty);
     
     /**
         Stop a screwdriver move
@@ -881,6 +881,9 @@ public:
         return m_screwMovePwmA;
     }
 
+    bool IsScrewDone () {
+        return m_screwDone;
+    }
 
 #ifndef HIDE_FROM_DOXYGEN
     virtual void OutputDirection() override {
@@ -1003,6 +1006,11 @@ private:
     int32_t m_enableCounter;
     bool m_shiftRegEnableReq;
 
+    // Internal fields for screwdriver control
+    bool m_screwDone;
+    uint16_t m_screwMinSeatMs;
+    uint16_t m_screwTorqueFilterMs;
+
     /**
         Construct, wire in pads and LED Shift register object
     **/
@@ -1028,7 +1036,11 @@ private:
     void RefreshScrewdriver();
 
     // Check for clutch active and over current based on m_screwMode
-    bool ScrewDone();
+    bool ScrewDoneCheck();
+
+    bool TriggerState() {
+        return HlfbState() == HLFB_ASSERTED;
+    }
 
     /**
         \brief Sets/Clears the fault flag and halts/restores the motor.

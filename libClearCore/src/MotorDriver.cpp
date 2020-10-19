@@ -105,6 +105,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_screwMovePwmATarget(.5),
       m_dutyPerSample(1),
       m_screwClutchThreshold(SCREW_CLUTCH_THRESHOLD),
+      m_isScrewDone(false),
       m_polarityInversions(0),
       m_enableRequestedState(false),
       m_enableTriggerActive(false),
@@ -140,7 +141,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
     m_bTccSyncReg = &theTcc->SYNCBUSY.reg;
 }
 
-bool MotorDriver::ScrewDone() {
+bool MotorDriver::ScrewDoneCheck() {
     switch (m_screwMode) {
         case SCREW_MODE_IMON:
             
@@ -157,16 +158,16 @@ bool MotorDriver::ScrewDone() {
 */
 void MotorDriver::RefreshScrewdriver() {
     // Check if the screw process is complete
-    bool isScrewDone = ScrewDone();
+    m_isScrewDone = ScrewDoneCheck();
 
     // If the trigger is not held
-    if (HlfbState() != HLFB_ASSERTED) {
+    if (!TriggerState()) {
         // Override the target to temporarily stop the screwdriver
         MotorInADuty(DUTY_50_PCT);
         MotorInBDuty(DUTY_50_PCT);
         m_screwMovePwmA = DUTY_50_PCT;
     }
-    else if (isScrewDone) {
+    else if (m_isScrewDone) {
         // Stop the screwdriver and cancel the current move
         StopScrewdriver();
     }
@@ -402,8 +403,8 @@ bool MotorDriver::MoveVelocity(int32_t velocity) {
     return StepGenerator::MoveVelocity(velocity);
 }
 
-bool MotorDriver::MoveScrewdriver(uint8_t duty,
-                                  bool direction) {
+bool MotorDriver::ScrewStart(uint8_t duty,
+                             bool direction) {
     // Check for out of bounds
     if (duty > UINT8_MAX) return false;
 
@@ -422,8 +423,8 @@ bool MotorDriver::MoveScrewdriver(uint8_t duty,
     return true;
 }
 
-bool MotorDriver::MoveScrewdriver(uint8_t duty) {
-    return MoveScrewdriver(duty, true);
+bool MotorDriver::ScrewStart(uint8_t duty) {
+    return ScrewStart(duty, true);
 }
 
 void MotorDriver::StopScrewdriver() {
