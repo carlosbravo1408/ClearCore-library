@@ -105,7 +105,12 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_screwMovePwmATarget(.5),
       m_dutyPerSample(1),
       m_screwClutchThreshold(SCREW_CLUTCH_THRESHOLD),
+      m_screwTorqueThreshold(-1),
+      m_systemTrqRatio(-1),
+      m_systemTrqOffset(-1),
+      m_screwCalMode(false),
       m_screwDone(false),
+      m_hallSensorOffset(-1),
       m_polarityInversions(0),
       m_enableRequestedState(false),
       m_enableTriggerActive(false),
@@ -144,7 +149,22 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
 bool MotorDriver::ScrewDoneCheck() {
     switch (m_screwMode) {
         case SCREW_MODE_IMON:
-            
+            // If we are in cal mode
+            if (m_screwCalMode) {
+                float trqReading = GetInGReading();
+                if (trqReading >= m_screwTorqueFilterMs) {
+                    // Check the raw reading against the cal value
+                    return true;
+                }
+            }
+            else if (m_systemTrqRatio != -1){
+                // As long as a torque threshold and system cal has been set
+                // Calculate the torque and compare it to the threshold
+                if (GetTorqueVal() >= m_screwTorqueThreshold) {
+                    return true;
+                }
+            }
+            return false;
             break;
         case SCREW_MODE_CLUTCH:
         default:
@@ -153,12 +173,67 @@ bool MotorDriver::ScrewDoneCheck() {
     }
 }
 
+float MotorDriver::GetTorqueVal() {
+    return m_systemTrqRatio * (GetInGReading() - m_hallSensorOffset);
+}
+
+void MotorDriver::ScrewCalStart(float thePct) {
+    float adcMax = AdcMgr.ADC_CHANNEL_MAX_FLOAT[AdcManager::ADC_SDRVR2_IMON];
+
+    m_screwTorqueThreshold = (thePct * (adcMax - m_hallSensorOffset)) 
+                                + m_hallSensorOffset;
+    m_screwCalMode = true;
+    ScrewStart(253);
+}
+
+
+void MotorDriver::ScrewCalDone(float theTorque) {
+    // Enter the current threshold and the entered torque
+    ScrewCalEnter(m_screwTorqueThreshold, theTorque);
+}
+
+void MotorDriver::ScrewCalEnter(float theVoltage, float theTorque) {
+    if (m_screwCalData[1][1] == -1) {
+        // No data, enter into the first dataset
+        m_screwCalData[1][1] = theVoltage;
+        m_screwCalData[1][2] = theTorque;
+        // Calculate the slope based on this point and the zero
+        m_systemTrqRatio = theTorque / (theVoltage - m_hallSensorOffset);
+        m_systemTrqOffset = 0;
+    }
+    else {
+        m_screwCalData[2][1] = theVoltage;
+        m_screwCalData[2][2] = theTorque;
+        if (m_screwCalData[2][2] > m_screwCalData[1][2]) {
+            // Trq2 > Trq1
+            // m = (y2-y1)/(x2-x1)
+            m_systemTrqRatio = (m_screwCalData[2][2] - m_screwCalData[1][2]) 
+                                    / (m_screwCalData[2][1] - m_screwCalData[1][1]);
+            // b = mx + y
+            m_systemTrqOffset = (m_systemTrqRatio * m_screwCalData[1][1]) 
+                                    + m_screwCalData[1][2];
+        }
+        else {
+            // Trq1 > Trq2
+            // m = (y1-y2)/(x1-x2)
+            m_systemTrqRatio = (m_screwCalData[1][2] - m_screwCalData[2][2])
+                                    / (m_screwCalData[1][1] - m_screwCalData[2][1]);
+            // b = mx + y
+            m_systemTrqOffset = (m_systemTrqRatio * m_screwCalData[1][1])
+                                    + m_screwCalData[1][2];
+        }
+    }
+    m_screwCalMode = false;
+}
+
 /*
     Update the Screwdriver move
 */
-void MotorDriver::RefreshScrewdriver() {
+ void MotorDriver::RefreshScrewdriver() {
     // Check if the screw process is complete
     m_screwDone = ScrewDoneCheck();
+
+    
 
     // If the trigger is not held
     if (!TriggerState()) {
@@ -200,6 +275,11 @@ void MotorDriver::Refresh() {
 
     if (m_mode == Connector::SCREWDRIVER && m_isEnabled) {
         RefreshScrewdriver();
+    }
+
+    if (!m_isEnabled) {
+        // Update the screwdriver hall offset if appropriate
+        m_hallSensorOffset = GetInGReading();
     }
 
     // Process the HLFB input as static levels/filtering
@@ -728,12 +808,12 @@ void MotorDriver::InitializeScrewdriver(ClearCorePins clutchPin) {
     
 }
 
-uint16_t MotorDriver::GetInGReading() {
+float MotorDriver::GetInGReading() {
     if (m_clearCorePin == CLEARCORE_PIN_M2) {
-        return AdcMgr.FilteredResult(AdcManager::ADC_SDRVR2_IMON);
+        return AdcMgr.AnalogVoltage(AdcManager::ADC_SDRVR2_IMON);
     }
     else if (m_clearCorePin == CLEARCORE_PIN_M3) {
-        return AdcMgr.FilteredResult(AdcManager::ADC_SDRVR3_IMON);
+        return AdcMgr.AnalogVoltage(AdcManager::ADC_SDRVR3_IMON);
     }
 }
 

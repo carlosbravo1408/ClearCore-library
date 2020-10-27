@@ -59,6 +59,7 @@ namespace ClearCore {
 /** Default clutch input threhshold in volts **/
 #define SCREW_CLUTCH_THRESHOLD 1.0
 #define DUTY_50_PCT 127
+#define SCREW_CAL_TRQ 3.0
 
 /**
     \brief ClearCore motor connector class.
@@ -867,23 +868,25 @@ public:
     /**
         Stop a screwdriver move
     **/
-    void StopScrewdriver();
+    void ScrewStop();
 
     /**
         Specify the time the screwdriver will take to ramp from stopped to 100%
     **/
-    bool SetScrewRampTime(double rampTimeMS) {
+    bool SetScrewRampTime(uint16_t rampTimeMS) {
         m_dutyPerSample = (UINT8_MAX - DUTY_50_PCT) / 
-                                ((rampTimeMS / 1000) * SampleRateHz);
-    }
-
-    double GetScrewPwmA() {
-        return m_screwMovePwmA;
+                                ((static_cast<double>(rampTimeMS) / 1000) * SampleRateHz);
     }
 
     bool IsScrewDone () {
         return m_screwDone;
     }
+
+    void ScrewCalStart(float thePct);
+
+    void ScrewCalDone(float theTorque);
+
+    void ScrewCalEnter(float theVoltage, float theTorque);
 
 #ifndef HIDE_FROM_DOXYGEN
     virtual void OutputDirection() override {
@@ -959,7 +962,7 @@ protected:
     double m_dutyPerSample;
 
 
-    uint16_t GetInGReading();
+    
 
     bool IsClutchActive();
 
@@ -1010,6 +1013,17 @@ private:
     bool m_screwDone;
     uint16_t m_screwMinSeatMs;
     uint16_t m_screwTorqueFilterMs;
+    float m_screwTorqueThreshold;
+
+    // Internal fields for screwdriver calibration
+    float m_hallSensorOffset;
+    float m_systemTrqRatio;
+    float m_systemTrqOffset;
+    bool m_screwCalMode;
+    float m_screwCalData[2][2] = {{-1,-1},
+                                  {-1,-1}};
+
+
 
     /**
         Construct, wire in pads and LED Shift register object
@@ -1035,8 +1049,13 @@ private:
     // Check and update screwdriver state
     void RefreshScrewdriver();
 
+    // Get a reading of the ADC for the ground input
+    float GetInGReading();
+
     // Check for clutch active and over current based on m_screwMode
     bool ScrewDoneCheck();
+
+    float GetTorqueVal();
 
     bool TriggerState() {
         return HlfbState() == HLFB_ASSERTED;
