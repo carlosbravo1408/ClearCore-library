@@ -13,7 +13,8 @@
  *
  * Requirements:
  * 1. A ClearPath motor must be connected to Connector M-0.
- * 2. An analog sensor connected to connector A-9 to control motor position.
+ * 2. An analog sensor must be connected to Connector A-9 to control motor 
+ *    position.
  * 3. The connected ClearPath motor must be configured through the MSP software
  *    for Follow Digital Position Command, Unipolar PWM Command mode (In MSP
  *    select Mode>>Position>>Follow Digital Position Command, then with
