@@ -58,8 +58,10 @@ namespace ClearCore {
 
 /** Default clutch input threhshold in volts **/
 #define SCREW_CLUTCH_THRESHOLD 1.0
-#define DUTY_50_PCT 127
+#define DUTY_50_PCT 128
 #define SCREW_CAL_TRQ 3.0
+#define FRACT_SCREW_BITS 11
+#define CAL_PCT_RANGE .5
 
 /**
     \brief ClearCore motor connector class.
@@ -247,16 +249,11 @@ public:
         SCREW_MODE_IMON,
     } ScrewdriverModes;
 
+
     typedef enum {
         HLFB_CARRIER_45_HZ,
         HLFB_CARRIER_482_HZ
     } HlfbCarrierFrequency;
-
-    /**
-        \brief Setup the screwdriver's monitor mode to match the output
-        from the screwdriver.
-    **/
-    typedef enum
 
     /**
         \enum MotorReadyStates
@@ -1410,13 +1407,9 @@ public:
     }
 
     /**
-        Start a screwdriver move pwm, true makes PWM A > PWM B.
-        pct determines the target pwm rates with PWM A = .5 + (pct/2)
+        Start a screwdriver move pwm at the requested velocity
     **/
-    bool ScrewStart(uint8_t duty,
-                         bool direction);
-
-    bool ScrewStart(uint8_t duty);
+    bool ScrewStart(int8_t duty);
     
     /**
         Stop a screwdriver move
@@ -1426,20 +1419,30 @@ public:
     /**
         Specify the time the screwdriver will take to ramp from stopped to 100%
     **/
-    bool SetScrewRampTime(uint16_t rampTimeMS) {
+    void SetScrewRampTime(uint16_t rampTimeMS) {
         m_dutyPerSample = (UINT8_MAX - DUTY_50_PCT) / 
                                 ((static_cast<double>(rampTimeMS) / 1000) * SampleRateHz);
     }
+
+    void SetScrewTorqueLimit(uint16_t theTorque);
+
+    void SetScrewTorqueLimit(float theTorque);
 
     bool IsScrewDone () {
         return m_screwDone;
     }
 
-    void ScrewCalStart(float thePct);
+    uint16_t ScrewCalStart(uint16_t thePct);
+
+    float ScrewCalStart(float thePct);
+
+    void ScrewCalDone(uint16_t theTorque);
 
     void ScrewCalDone(float theTorque);
 
-    void ScrewCalEnter(float theVoltage, float theTorque);
+    void ScrewCalEnter(uint16_t theTorque, uint16_t theVoltage);
+
+    void ScrewCalEnter(float theTorque, float theVoltage);
 
 #ifndef HIDE_FROM_DOXYGEN
 
@@ -1551,12 +1554,9 @@ protected:
 
     ScrewdriverModes m_screwMode;
     float m_screwClutchThreshold;
-    double m_screwMovePwmA;
+    float m_screwMovePwmA;
     uint8_t m_screwMovePwmATarget;
-    double m_dutyPerSample;
-
-
-    
+    float m_dutyPerSample;
 
     bool IsClutchActive();
 
@@ -1585,8 +1585,6 @@ protected:
         Initialize hardware and/or internal state.
     **/
     void Initialize(ClearCorePins clearCorePin) override;
-    
-    void InitializeScrewdriver(ClearCorePins clutchPin);
 
     /**
         Function to toggle the enable state of the motor.
@@ -1637,8 +1635,8 @@ private:
     float m_systemTrqRatio;
     float m_systemTrqOffset;
     bool m_screwCalMode;
-    float m_screwCalData[2][2] = {{-1,-1},
-                                  {-1,-1}};
+    float m_screwCalData[2][2] = {{0, 0},
+                                  {0, 0}};
 
 
 

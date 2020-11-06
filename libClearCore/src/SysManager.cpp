@@ -264,12 +264,6 @@ void SysManager::Initialize() {
 
     for (int32_t i = 0; i < CLEARCORE_PIN_MAX; i++) {
         Connectors[i]->Initialize(static_cast<ClearCorePins>(i));
-        if (static_cast<ClearCorePins>(i) == CLEARCORE_PIN_M2) {
-             ConnectorM2.InitializeScrewdriver(CLEARCORE_PIN_M2_ING);
-        }
-        if (static_cast<ClearCorePins>(i) == CLEARCORE_PIN_M3) {
-            ConnectorM3.InitializeScrewdriver(CLEARCORE_PIN_M2_ING);
-        }
     }
 
     DmaMgr.Initialize();

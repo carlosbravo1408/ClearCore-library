@@ -125,16 +125,10 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_hlfbPwmReadingPending(false),
       m_hlfbStateChangeCounter(MS_TO_SAMPLES * HLFB_CARRIER_LOSS_STATE_CHANGE_MS_45_HZ),
       m_screwMode(SCREW_MODE_CLUTCH),
+      m_screwClutchThreshold(SCREW_CLUTCH_THRESHOLD),
       m_screwMovePwmA(127),
       m_screwMovePwmATarget(.5),
       m_dutyPerSample(1),
-      m_screwClutchThreshold(SCREW_CLUTCH_THRESHOLD),
-      m_screwTorqueThreshold(-1),
-      m_systemTrqRatio(-1),
-      m_systemTrqOffset(-1),
-      m_screwCalMode(false),
-      m_screwDone(false),
-      m_hallSensorOffset(-1),
       m_polarityInversions(0),
       m_enableRequestedState(false),
       m_enableTriggerActive(false),
@@ -161,7 +155,15 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_motionCancellingEStop(false),
       m_shiftRegEnableReq(false),
       m_clearFaultState(CLEAR_FAULT_IDLE),
-      m_clearFaultHlfbTimer(0) {
+      m_clearFaultHlfbTimer(0),
+      m_screwDone(false),
+      m_screwMinSeatMs(10),
+      m_screwTorqueFilterMs(10),
+      m_screwTorqueThreshold(-1),
+      m_hallSensorOffset(1.5),
+      m_systemTrqRatio(-1),
+      m_systemTrqOffset(-1),
+      m_screwCalMode(false) {
 
     m_interruptAvail = true;
 
@@ -184,15 +186,15 @@ bool MotorDriver::ScrewDoneCheck() {
             // If we are in cal mode
             if (m_screwCalMode) {
                 float trqReading = GetInGReading();
-                if (trqReading >= m_screwTorqueFilterMs) {
+                if (trqReading >= m_screwTorqueThreshold) {
                     // Check the raw reading against the cal value
                     return true;
                 }
             }
-            else if (m_systemTrqRatio != -1){
-                // As long as a torque threshold and system cal has been set
+            else {
                 // Calculate the torque and compare it to the threshold
-                if (GetTorqueVal() >= m_screwTorqueThreshold) {
+                float trq = GetTorqueVal();
+                if (trq >= m_screwTorqueThreshold) {
                     return true;
                 }
             }
@@ -206,56 +208,81 @@ bool MotorDriver::ScrewDoneCheck() {
 }
 
 float MotorDriver::GetTorqueVal() {
-    return m_systemTrqRatio * (GetInGReading() - m_hallSensorOffset);
+    return (m_systemTrqRatio * GetInGReading()) + m_systemTrqOffset;
 }
 
-void MotorDriver::ScrewCalStart(float thePct) {
+void MotorDriver::SetScrewTorqueLimit(uint16_t theTorque) {
+    float trq;
+    trq = static_cast<float>(theTorque) 
+            / static_cast<float>(1 << FRACT_SCREW_BITS);
+    SetScrewTorqueLimit(trq);
+}
+
+void MotorDriver::SetScrewTorqueLimit(float theTorque) {
+    m_screwTorqueThreshold = theTorque;
+}
+
+uint16_t MotorDriver::ScrewCalStart(uint16_t thePct) {
+    float retVal;
+    retVal = ScrewCalStart(static_cast<float>(thePct) / UINT16_MAX);
+    return static_cast<uint16_t>(retVal * (1 << FRACT_SCREW_BITS));
+}
+
+float MotorDriver::ScrewCalStart(float thePct) {
     float adcMax = AdcMgr.ADC_CHANNEL_MAX_FLOAT[AdcManager::ADC_SDRVR2_IMON];
 
-    m_screwTorqueThreshold = (thePct * (adcMax - m_hallSensorOffset)) 
-                                + m_hallSensorOffset;
+    m_screwTorqueThreshold = (thePct * adcMax * CAL_PCT_RANGE)
+                                    + m_hallSensorOffset;
     m_screwCalMode = true;
-    ScrewStart(253);
+    ScrewStart(50);
+    return m_screwTorqueThreshold;
 }
 
+void MotorDriver::ScrewCalDone(uint16_t theTorque) {
+    // Convert and call the float function
+    float trq;
+    trq = static_cast<float>(theTorque) 
+            / static_cast<float>(1 << FRACT_SCREW_BITS);
+    ScrewCalDone(trq);
+}
 
 void MotorDriver::ScrewCalDone(float theTorque) {
     // Enter the current threshold and the entered torque
     ScrewCalEnter(m_screwTorqueThreshold, theTorque);
+    m_screwCalMode = false;
 }
 
-void MotorDriver::ScrewCalEnter(float theVoltage, float theTorque) {
-    if (m_screwCalData[1][1] == -1) {
+void MotorDriver::ScrewCalEnter(uint16_t theTorque, uint16_t theVoltage) {
+    // Convert and call the float function
+    float trq, voltage;
+    trq = static_cast<float>(theTorque)
+            / static_cast<float>(1 << FRACT_SCREW_BITS);
+    voltage = static_cast<float>(theVoltage)
+                / static_cast<float>(1 << FRACT_SCREW_BITS);
+    ScrewCalEnter(trq, voltage);
+}
+
+void MotorDriver::ScrewCalEnter(float theTorque, float theVoltage) {
+    if (m_screwCalData[0][0] == 0) {
         // No data, enter into the first dataset
-        m_screwCalData[1][1] = theVoltage;
-        m_screwCalData[1][2] = theTorque;
+        m_screwCalData[0][0] = theVoltage;
+        m_screwCalData[0][1] = theTorque;
+
         // Calculate the slope based on this point and the zero
         m_systemTrqRatio = theTorque / (theVoltage - m_hallSensorOffset);
-        m_systemTrqOffset = 0;
+        m_systemTrqOffset = theTorque - (m_systemTrqRatio * theVoltage);
     }
     else {
-        m_screwCalData[2][1] = theVoltage;
-        m_screwCalData[2][2] = theTorque;
-        if (m_screwCalData[2][2] > m_screwCalData[1][2]) {
-            // Trq2 > Trq1
-            // m = (y2-y1)/(x2-x1)
-            m_systemTrqRatio = (m_screwCalData[2][2] - m_screwCalData[1][2]) 
-                                    / (m_screwCalData[2][1] - m_screwCalData[1][1]);
-            // b = mx + y
-            m_systemTrqOffset = (m_systemTrqRatio * m_screwCalData[1][1]) 
-                                    + m_screwCalData[1][2];
-        }
-        else {
-            // Trq1 > Trq2
-            // m = (y1-y2)/(x1-x2)
-            m_systemTrqRatio = (m_screwCalData[1][2] - m_screwCalData[2][2])
-                                    / (m_screwCalData[1][1] - m_screwCalData[2][1]);
-            // b = mx + y
-            m_systemTrqOffset = (m_systemTrqRatio * m_screwCalData[1][1])
-                                    + m_screwCalData[1][2];
-        }
+        m_screwCalData[1][0] = theVoltage;
+        m_screwCalData[1][1] = theTorque;
+
+        // m = (y2-y1)/(x2-x1)
+        m_systemTrqRatio = (m_screwCalData[1][1] - m_screwCalData[0][1]) 
+                                / (m_screwCalData[1][0] - m_screwCalData[0][0]);
+        // b = mx + y
+        m_systemTrqOffset = m_screwCalData[1][1] 
+                                - (m_systemTrqRatio * m_screwCalData[1][0]);
     }
-    m_screwCalMode = false;
 }
 
 /*
@@ -617,28 +644,19 @@ void MotorDriver::AddToPosition(int32_t posnAdjust) {
     __enable_irq();
 }
 
-bool MotorDriver::ScrewStart(uint8_t duty,
-                             bool direction) {
+bool MotorDriver::ScrewStart(int8_t duty) {
     // Check for out of bounds
-    if (duty > UINT8_MAX) return false;
+    if (duty >= INT8_MAX || duty <= INT8_MIN) return false;
 
     // Make sure we are enabled and that a screw move is marked as requested
     if (!m_enableRequestedState) {
         EnableRequest(true);
     }
 
-    // Based on the direction of the move, determine the PWM rates
-    if (direction) {
-        m_screwMovePwmATarget = duty;
-    }
-    else {
-        m_screwMovePwmATarget = UINT8_MAX - duty;
-    }
-    return true;
-}
+    // Set the appropriate PWM target
+    m_screwMovePwmATarget = DUTY_50_PCT + duty;
 
-bool MotorDriver::ScrewStart(uint8_t duty) {
-    return ScrewStart(duty, true);
+    return true;
 }
 
 void MotorDriver::ScrewStop() {
@@ -959,10 +977,6 @@ void MotorDriver::Initialize(ClearCorePins clearCorePin) {
     m_initialized = true;
 }
 
-void MotorDriver::InitializeScrewdriver(ClearCorePins clutchPin) {
-    
-}
-
 float MotorDriver::GetInGReading() {
     if (m_clearCorePin == CLEARCORE_PIN_M2) {
         return AdcMgr.AnalogVoltage(AdcManager::ADC_SDRVR2_IMON);
@@ -970,6 +984,7 @@ float MotorDriver::GetInGReading() {
     else if (m_clearCorePin == CLEARCORE_PIN_M3) {
         return AdcMgr.AnalogVoltage(AdcManager::ADC_SDRVR3_IMON);
     }
+    return 0;
 }
 
 bool MotorDriver::IsClutchActive() {
