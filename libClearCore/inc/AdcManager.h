@@ -106,8 +106,8 @@ public:
         10.0,       // ADC_AIN11
         10.0,       // ADC_AIN10
         10.0,       // ADC_AIN09
-        3.0,       // ADC_SDRVR3_IMON
-        3.0        // ADC_SDRVR2_IMON
+        3.3,       // ADC_SDRVR3_IMON
+        3.3        // ADC_SDRVR2_IMON
     };
 
     /**
