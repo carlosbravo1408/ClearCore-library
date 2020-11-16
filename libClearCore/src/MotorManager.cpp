@@ -162,6 +162,18 @@ bool MotorManager::MotorModeSet(MotorPair motorPair,
                              m_stepDataBits[motorPair]);
             }
             break;
+        case Connector::SCREWDRIVER:
+            if (motorPair == MOTOR_M2M3) {
+                // TODO - figure out why M3 is not getting set
+                m_motorModes[motorPair] = newMode;
+                MotorConnectors[2]->Mode(newMode);
+                MotorConnectors[3]->Mode(newMode);
+                PMUX_DISABLE(m_stepPorts[motorPair],
+                             m_stepDataBits[motorPair]);
+            }
+            else {
+                // Can not use screwdriver mode if you are not on M2M3
+            }
         default:
             break;
     }

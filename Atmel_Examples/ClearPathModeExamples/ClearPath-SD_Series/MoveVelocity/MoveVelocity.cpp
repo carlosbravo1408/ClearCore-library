@@ -3,7 +3,7 @@
  *
  * Objective:
  *    This example demonstrates control of a ClearPath motor in Step and
- *    Direction mode.
+ *    Direction mode, making velocity moves.
  *
  * Description:
  *    This example enables a ClearPath then commands a series of repeating
@@ -19,13 +19,9 @@
  *    the OK button).
  * 4. Set the Input Format in MSP for "Step + Direction".
  *
- * ** Note: Homing is optional, and not required in this operational mode or in
- *    this example. This example makes its first move in the positive direction,
- *    assuming any homing move occurs in the negative direction.
- *
  * ** Note: Set the Input Resolution in MSP the same as your motor's Positioning
- *    Resolution spec if you'd like the pulses sent by ClearCore to command a
- *    move of the same number of Encoder Counts, a 1:1 ratio.
+ *    Resolution spec if you'd like the pulse frequency sent by ClearCore to 
+ *    command the same frequency in motor encoder counts/sec, a 1:1 ratio.
  *
  * Links:
  * ** ClearCore Documentation: https://teknic-inc.github.io/ClearCore-library/
@@ -51,7 +47,6 @@
 #define SerialPort ConnectorUsb
 
 // Define the velocity and acceleration limits to be used for each move
-int32_t velocityLimit = 10000; // pulses per sec
 int32_t accelerationLimit = 100000; // pulses per sec^2
 
 // Declares our user-defined helper function, which is used to command moves to
@@ -67,9 +62,6 @@ int main() {
     // Sets all motor connectors into step and direction mode.
     MotorMgr.MotorModeSet(MotorManager::MOTOR_ALL,
                           Connector::CPM_MODE_STEP_AND_DIR);
-
-    // Sets the maximum velocity for each move
-    motor.VelMax(velocityLimit);
 
     // Set the maximum acceleration for each move
     motor.AccelMax(accelerationLimit);
@@ -97,17 +89,17 @@ int main() {
     SerialPort.SendLine("Motor Ready");
 
     while (true) {
-        // Move at 20,000 counts/sec, then wait 2000ms
-        MoveAtVelocity(20000);
-        Delay_ms(2000);
-        // Move at -40,000 counts/sec, then wait 2000ms
-        MoveAtVelocity(-40000);
-        Delay_ms(2000);
         // Move at 10,000 counts/sec, then wait 2000ms
         MoveAtVelocity(10000);
         Delay_ms(2000);
-        // Increase speed to 15,000 counts/sec, then wait 2000ms
-        MoveAtVelocity(15000);
+        // Move at -5,000 counts/sec, then wait 2000ms
+        MoveAtVelocity(-5000);
+        Delay_ms(2000);
+        // Move at 7,000 counts/sec, then wait 2000ms
+        MoveAtVelocity(7000);
+        Delay_ms(2000);
+        // Move at -10,000 counts/sec, then wait 2000ms
+        MoveAtVelocity(-10000);
         Delay_ms(2000);
         // Command a 0 counts/sec velocity to stop motion, then wait 2000ms
         MoveAtVelocity(0);
@@ -118,7 +110,7 @@ int main() {
 /*------------------------------------------------------------------------------
  * MoveAtVelocity
  *
- *    Command the motor to move at the specified "velocity", in steps/second.
+ *    Command the motor to move at the specified "velocity", in pulses/second.
  *    Prints the move status to the USB serial port
  *
  * Parameters:

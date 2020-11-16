@@ -80,8 +80,8 @@ public:
             Bit-wise view of the shift register.
         **/
         struct _bit {
-            uint32_t A_CTRL_3 : 1;            // 0
-            uint32_t A_CTRL_2 : 1;            // 1
+            uint32_t SCRW_CTRL_3 : 1;         // 0
+            uint32_t SCRW_CTRL_2 : 1;         // 1
             uint32_t LED_IO_5 : 1;            // 2
             uint32_t LED_IO_4 : 1;            // 3
             uint32_t LED_IO_3 : 1;            // 4

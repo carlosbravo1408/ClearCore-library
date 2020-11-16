@@ -237,6 +237,27 @@ public:
     }
 
 protected:
+    struct LimitStatus {
+	    uint32_t InLimit            : 1;    // True if we are in a limit
+	    uint32_t LimitRampPos       : 1;    // True if we are ramping into the positive limit
+	    uint32_t LimitRampNeg       : 1;    // True if we are ramping into the negative limit
+	    uint32_t EnterHWLimit       : 1;    // True when entering HW limits
+	    uint32_t InPosHWLimit       : 1;    // True if we are in the positive HW limit
+	    uint32_t InNegHWLimit       : 1;    // True if we are in the negative HW limit
+	    uint32_t InPosHWLimitLast   : 1;
+	    uint32_t InNegHWLimitLast   : 1;
+
+	    public:
+	    LimitStatus()
+	    : InLimit(0),
+	    LimitRampPos(0),
+	    LimitRampNeg(0),
+	    EnterHWLimit(0),
+	    InPosHWLimit(0),
+	    InNegHWLimit(0),
+	    InPosHWLimitLast(0),
+	    InNegHWLimitLast(0) {}
+    };
     typedef enum {
         MS_IDLE,
         MS_START,
@@ -255,6 +276,10 @@ protected:
     // True if the last move commanded was a positional move (latched)
     bool m_lastMoveWasPositional;
 
+    LimitStatus m_limitInfo;
+
+    int32_t m_posnAbsolute;
+
     volatile const bool &Direction() {
         return m_direction;
     }
@@ -267,6 +292,18 @@ protected:
 
     uint32_t StepsPrevious() {
         return m_stepsPrevious;
+    }
+
+    bool CheckTravelLimits();
+
+    bool LimitSwitchCheck();
+
+    void PosLimitActive(bool isActive) {
+	    m_limitInfo.InPosHWLimit = isActive;
+    }
+
+    void NegLimitActive(bool isActive) {
+	    m_limitInfo.InNegHWLimit = isActive;
     }
 
     /**
@@ -285,7 +322,6 @@ protected:
     void EStopDecelMax(uint32_t decelMax);
 
 private:
-    int32_t m_posnAbsolute;
 
     int32_t m_stepsCommanded;
     int32_t m_stepsSent;      // Accumulated integer position

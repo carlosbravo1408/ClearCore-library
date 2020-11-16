@@ -47,6 +47,8 @@ void StepGenerator::StepsCalculated() {
         m_accelCurrentQx = m_accelLimitQx;
         m_posnTargetQx = static_cast<int64_t>(m_stepsCommanded)
                          << FRACT_BITS;
+		// Clear the InLimit flag, this will be set again if move violates limits
+		m_limitInfo.InLimit = false;
 
         if (m_velocityMove) {
             if (m_velTargetQx && m_velCurrentQx && m_direction != m_dirCommanded) {
@@ -329,6 +331,8 @@ void StepGenerator::StepsCalculated() {
             m_stepsCommanded = 0;
             m_moveState = MS_IDLE;
             m_velocityMove = false;
+            m_limitInfo.LimitRampPos = false;
+            m_limitInfo.LimitRampNeg = false;
             return;
     }
 
@@ -351,6 +355,7 @@ StepGenerator::StepGenerator()
       m_moveState(MS_IDLE),
       m_direction(false),
       m_lastMoveWasPositional(true),
+	  m_limitInfo(),
       m_posnAbsolute(0),
       m_stepsCommanded(0),
       m_stepsSent(0),
@@ -577,6 +582,45 @@ void StepGenerator::StepsPerSampleMaxSet(uint32_t maxSteps) {
     velLim64 = max(velLim64, 1);
     // Clip velocity limit if higher than max velocity limit
     m_velLimitPendingQx = min(velLim64, m_velLimitQx);
+}
+
+ bool StepGenerator::LimitSwitchCheck() {
+	 // Handle the idle case
+	 if (m_moveState == MS_IDLE) {
+		 return false;
+	 }
+
+	 return false;
+ }
+
+ bool StepGenerator::CheckTravelLimits() {
+	 if (m_stepsPrevious == 0) {
+		 return false;
+	 }
+
+	 // Determine if we are physically in the hardware limits
+	 m_limitInfo.EnterHWLimit = (m_limitInfo.InPosHWLimit || m_limitInfo.InNegHWLimit)
+	 && ((m_limitInfo.InPosHWLimit != m_limitInfo.InPosHWLimitLast)
+	 ||  (m_limitInfo.InNegHWLimit != m_limitInfo.InNegHWLimitLast));
+	 m_limitInfo.InPosHWLimitLast = m_limitInfo.InPosHWLimit;
+	 m_limitInfo.InNegHWLimitLast = m_limitInfo.InNegHWLimit;
+
+
+	 if (m_limitInfo.EnterHWLimit) {
+
+		 if ((!m_direction && m_limitInfo.InPosHWLimit) ||
+		 (m_direction && m_limitInfo.InNegHWLimit)) {
+			 // Ramp to a stop
+			 if (!m_direction) {
+				 m_limitInfo.LimitRampPos = true;
+			 }
+			 else {
+				 m_limitInfo.LimitRampNeg = true;
+			 }
+			 MoveStopDecel();
+		 }
+	 }
+	 return false;
 }
 
 } // ClearCore namespace

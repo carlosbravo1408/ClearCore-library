@@ -70,6 +70,7 @@ typedef void (*voidFuncPtr)(void);
 class DigitalIn : public Connector {
     friend class SysManager;
     friend class TestIO;
+    friend class MotorDriver;
 
 public:
 #ifndef HIDE_FROM_DOXYGEN
