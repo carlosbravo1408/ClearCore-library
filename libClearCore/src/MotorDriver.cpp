@@ -158,6 +158,7 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
       m_clearFaultHlfbTimer(0),
       m_screwDone(false),
       m_screwMinSeatMs(10),
+      m_screwMinSeatTimer(0),
       m_screwTorqueFilterMs(10),
       m_screwTorqueThreshold(-1),
       m_hallSensorOffset(1.5),
@@ -181,6 +182,12 @@ MotorDriver::MotorDriver(ShiftRegister::Masks enableMask,
 }
 
 bool MotorDriver::ScrewDoneCheck() {
+    // Check the minimum seating time and exit early if not met
+    if (m_screwMinSeatTimer > 0) {
+        m_screwMinSeatTimer--;
+        return false;
+    }
+
     switch (m_screwMode) {
         case SCREW_MODE_IMON:
             // If we are in cal mode
@@ -234,7 +241,7 @@ float MotorDriver::ScrewCalStart(float thePct) {
     m_screwTorqueThreshold = (thePct * adcMax * CAL_PCT_RANGE)
                                     + m_hallSensorOffset;
     m_screwCalMode = true;
-    ScrewStart(50);
+    ScrewStart(SCREW_CAL_VEL);
     return m_screwTorqueThreshold;
 }
 
@@ -300,6 +307,8 @@ void MotorDriver::ScrewCalEnter(float theTorque, float theVoltage) {
         MotorInADuty(DUTY_50_PCT);
         MotorInBDuty(DUTY_50_PCT);
         m_screwMovePwmA = DUTY_50_PCT;
+        // Reset the minimum seat counter if appropriate
+        ResetScrewSeatTimer();
     }
     else if (m_screwDone) {
         // Stop the screwdriver and cancel the current move
@@ -648,6 +657,9 @@ bool MotorDriver::ScrewStart(int8_t duty) {
     // Check for out of bounds
     if (duty >= INT8_MAX || duty <= INT8_MIN) return false;
 
+    // Set the minimum seat timer
+    ResetScrewSeatTimer();
+
     // Make sure we are enabled and that a screw move is marked as requested
     if (!m_enableRequestedState) {
         EnableRequest(true);
@@ -665,6 +677,9 @@ void MotorDriver::ScrewStop() {
     MotorInBDuty(DUTY_50_PCT);
     m_screwMovePwmATarget = DUTY_50_PCT;
     m_screwMovePwmA = DUTY_50_PCT;
+
+    // Reset the minimum seat timer
+    ResetScrewSeatTimer();
 }
 
 MotorDriver::StatusRegMotor MotorDriver::StatusRegRisen() {

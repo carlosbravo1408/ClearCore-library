@@ -59,7 +59,7 @@ namespace ClearCore {
 /** Default clutch input threhshold in volts **/
 #define SCREW_CLUTCH_THRESHOLD 1.0
 #define DUTY_50_PCT 128
-#define SCREW_CAL_TRQ 3.0
+#define SCREW_CAL_VEL 100
 #define FRACT_SCREW_BITS 11
 #define CAL_PCT_RANGE .5
 
@@ -1428,6 +1428,10 @@ public:
 
     void SetScrewTorqueLimit(float theTorque);
 
+    void SetScrewMinSeatMs(uint16_t duration) {
+        m_screwMinSeatMs = duration;
+    }
+
     bool IsScrewDone () {
         return m_screwDone;
     }
@@ -1627,6 +1631,7 @@ private:
     // Internal fields for screwdriver control
     bool m_screwDone;
     uint16_t m_screwMinSeatMs;
+    uint16_t m_screwMinSeatTimer;
     uint16_t m_screwTorqueFilterMs;
     float m_screwTorqueThreshold;
 
@@ -1663,6 +1668,10 @@ private:
 
     // Check and update screwdriver state
     void RefreshScrewdriver();
+
+    void ResetScrewSeatTimer() {
+        m_screwMinSeatTimer = m_screwMinSeatMs * SampleRateHz / 1000;
+    }
 
     // Get a reading of the ADC for the ground input
     float GetInGReading();
