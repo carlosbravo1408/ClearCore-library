@@ -303,7 +303,8 @@ void MotorDriver::ScrewCalEnter(float theTorque, float theVoltage) {
 
     // If the trigger is not held
     if (!TriggerState()) {
-        // Override the target to temporarily stop the screwdriver
+        // Disable the screwdriver and set the current duty to 50 pct
+        EnableRequest(false);
         MotorInADuty(DUTY_50_PCT);
         MotorInBDuty(DUTY_50_PCT);
         m_screwMovePwmA = DUTY_50_PCT;
@@ -315,6 +316,7 @@ void MotorDriver::ScrewCalEnter(float theTorque, float theVoltage) {
         ScrewStop();
     }
     else {
+        EnableRequest(true);
         if (m_screwMovePwmA < m_screwMovePwmATarget) {
             m_screwMovePwmA += m_dutyPerSample;
             if (m_screwMovePwmA > m_screwMovePwmATarget) {
@@ -341,13 +343,13 @@ void MotorDriver::Refresh() {
         return;
     }
 
-    if (m_mode == Connector::SCREWDRIVER && m_isEnabled) {
-        RefreshScrewdriver();
-    }
-
     if (!m_isEnabled) {
         // Update the screwdriver hall offset if appropriate
         m_hallSensorOffset = GetInGReading();
+    }
+
+    if (m_mode == Connector::SCREWDRIVER) {
+        RefreshScrewdriver();
     }
 
     // Process the HLFB input as static levels/filtering
@@ -659,11 +661,6 @@ bool MotorDriver::ScrewStart(int8_t duty) {
 
     // Set the minimum seat timer
     ResetScrewSeatTimer();
-
-    // Make sure we are enabled and that a screw move is marked as requested
-    if (!m_enableRequestedState) {
-        EnableRequest(true);
-    }
 
     // Set the appropriate PWM target
     m_screwMovePwmATarget = DUTY_50_PCT + duty;
